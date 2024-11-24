@@ -1,6 +1,4 @@
 import LLMPkg from "llmpkg";
-import { zodResponseFormat } from "llmpkg/helpers/zod";
-import { z } from "zod";
 
 export interface Message {
   role: "user" | "assistant" | "system";
@@ -12,14 +10,10 @@ export interface SendMessageOptions {
   maxTokens?: number;
 }
 
-// Define the message schema once
-export const structuredMessageSchema = z.object({
-  explanation: z.string(),
-  decision: z.boolean(),
-});
-
-// Infer the type from the schema
-export type StructuredMessage = z.infer<typeof structuredMessageSchema>;
+export interface StructuredMessage {
+  explanation: string;
+  decision: boolean;
+}
 
 export async function sendMessage({
   messages,
@@ -32,14 +26,62 @@ export async function sendMessage({
   const completion = await llmpkg.completions({
     model: process.env.MODEL,
     messages: messages,
-    response_format: zodResponseFormat(structuredMessageSchema, "event"),
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "approveTransfer",
+          description:
+            "Approve the money transfer request and provide explanation",
+          parameters: {
+            type: "object",
+            properties: {
+              explanation: {
+                type: "string",
+                description:
+                  "Explanation for why the money transfer is approved",
+              },
+            },
+            required: ["explanation"],
+          },
+        },
+      },
+      {
+        type: "function",
+        function: {
+          name: "rejectTransfer",
+          description:
+            "Reject the money transfer request and provide explanation",
+          parameters: {
+            type: "object",
+            properties: {
+              explanation: {
+                type: "string",
+                description:
+                  "Explanation for why the money transfer is rejected",
+              },
+            },
+            required: ["explanation"],
+          },
+        },
+      },
+    ],
   });
 
-  console.log("event", completion.choices);
-  const event = completion.choices[0].message.parsed;
+  const toolCall = completion.messages[0].tool_calls?.[0];
 
-  if (!event) {
-    throw new Error("Failed to parse LLM response");
+  if (!toolCall) {
+    // If no tool call, use the model's response as explanation and default to reject
+    return {
+      explanation: completion.messages[0].content || "Transfer rejected",
+      decision: false,
+    };
   }
-  return event;
+
+  const args = JSON.parse(toolCall.function.arguments);
+
+  return {
+    explanation: args.explanation,
+    decision: toolCall.function.name === "approveTransfer",
+  };
 }
