@@ -1,4 +1,4 @@
-import LLMPkg from "llmpkg";
+import OpenAI from "openai";
 
 export interface Message {
   role: "user" | "assistant" | "system";
@@ -19,12 +19,12 @@ export async function sendMessage({
   messages,
   maxTokens = 3000,
 }: SendMessageOptions): Promise<StructuredMessage> {
-  const llmpkg = new LLMPkg({
-    apiKey: process.env.LLM_API_KEY,
+  const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
   });
 
-  const completion = await llmpkg.completions({
-    model: process.env.MODEL,
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4",
     messages: messages,
     tools: [
       {
@@ -66,19 +66,21 @@ export async function sendMessage({
         },
       },
     ],
+    tool_choice: "auto",
   });
 
-  const toolCall = completion.messages[0].tool_calls?.[0];
+  const toolCall = completion.choices[0].message.tool_calls?.[0];
 
   if (!toolCall) {
-    // If no tool call, use the model's response as explanation and default to reject
+    console.log("No tool call", completion.choices[0].message.content);
     return {
-      explanation: completion.messages[0].content || "Transfer rejected",
+      explanation: completion.choices[0].message.content || "Transfer rejected",
       decision: false,
     };
   }
 
   const args = JSON.parse(toolCall.function.arguments);
+  console.log("Tool call", toolCall.function.name, args);
 
   return {
     explanation: args.explanation,
